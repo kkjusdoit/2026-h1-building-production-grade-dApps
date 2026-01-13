@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { MiniSwap_ADDRESS, MiniSwap_ABI, ERC20_ABI, RPC, CHAIN_ID_HEX } from '../constants';
 
@@ -15,6 +15,8 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
     const [tokenB, setTokenB] = useState('0x40be9502BE89d15897453699BA8264762B28FF9a');
     const [amount, setAmount] = useState('');
     const [status, setStatus] = useState('');
+    const [balanceA, setBalanceA] = useState<string | null>(null);
+    const [balanceB, setBalanceB] = useState<string | null>(null);
 
     const withTimeout = async <T,>(p: Promise<T>, ms = 15000): Promise<T> => {
         return await Promise.race([
@@ -22,6 +24,58 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
             new Promise<T>((_, reject) => setTimeout(() => reject(new Error('RPC call timed out')), ms)),
         ] as any);
     };
+
+    // Auto-fetch token balances when token addresses or account change
+    useEffect(() => {
+        let mounted = true;
+        if (!account) {
+            setBalanceA(null);
+            setBalanceB(null);
+            return;
+        }
+        const readProvider = new ethers.JsonRpcProvider(RPC);
+        (async () => {
+            try {
+                // token A
+                const codeA = await withTimeout(readProvider.getCode(tokenA));
+                if (!codeA || codeA === '0x') {
+                    if (mounted) setBalanceA('—');
+                } else {
+                    const tokenARead = new ethers.Contract(tokenA, ERC20_ABI, readProvider as any);
+                    const [decA, symA, balA] = await Promise.all([tokenARead.decimals(), tokenARead.symbol(), tokenARead.balanceOf(account)]);
+                    try {
+                        const fa = Number(ethers.formatUnits(balA, Number(decA)));
+                        if (mounted) setBalanceA(`${fa.toFixed(6)} ${symA}`);
+                    } catch (e) {
+                        if (mounted) setBalanceA('N/A');
+                    }
+                }
+
+                // token B
+                const codeB = await withTimeout(readProvider.getCode(tokenB));
+                if (!codeB || codeB === '0x') {
+                    if (mounted) setBalanceB('—');
+                } else {
+                    const tokenBRead = new ethers.Contract(tokenB, ERC20_ABI, readProvider as any);
+                    const [decB, symB, balB] = await Promise.all([tokenBRead.decimals(), tokenBRead.symbol(), tokenBRead.balanceOf(account)]);
+                    try {
+                        const fb = Number(ethers.formatUnits(balB, Number(decB)));
+                        if (mounted) setBalanceB(`${fb.toFixed(6)} ${symB}`);
+                    } catch (e) {
+                        if (mounted) setBalanceB('N/A');
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not read token balances in effect', e);
+                if (mounted) {
+                    setBalanceA(null);
+                    setBalanceB(null);
+                }
+            }
+        })();
+
+        return () => { mounted = false; };
+    }, [tokenA, tokenB, account]);
 
     const handleAddLiquidity = async () => {
         setStatus('Preparing to add liquidity...');
@@ -78,8 +132,8 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
             }
 
             // Verify token contracts exist on the network
+            let readProvider = new ethers.JsonRpcProvider(RPC);
             try {
-                const readProvider = new ethers.JsonRpcProvider(RPC);
                 const codeA = await withTimeout(readProvider.getCode(tokenA));
                 if (!codeA || codeA === '0x') {
                     setStatus(`No contract found at token address ${tokenA}. Check the address and network.`);
@@ -93,6 +147,31 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
             } catch (e: any) {
                 console.warn('Failed to verify token contracts', e);
             }
+
+            // Fetch and show token balances for UI convenience
+            try {
+                const tokenARead = new ethers.Contract(tokenA, ERC20_ABI, readProvider as any);
+                const tokenBRead = new ethers.Contract(tokenB, ERC20_ABI, readProvider as any);
+                const [decA, symA, balA] = await Promise.all([tokenARead.decimals(), tokenARead.symbol(), tokenARead.balanceOf(account)]);
+                const [decB, symB, balB] = await Promise.all([tokenBRead.decimals(), tokenBRead.symbol(), tokenBRead.balanceOf(account)]);
+                try {
+                    const fa = Number(ethers.formatUnits(balA, Number(decA)));
+                    setBalanceA(`${fa.toFixed(6)} ${symA}`);
+                } catch (e) {
+                    setBalanceA('N/A');
+                }
+                try {
+                    const fb = Number(ethers.formatUnits(balB, Number(decB)));
+                    setBalanceB(`${fb.toFixed(6)} ${symB}`);
+                } catch (e) {
+                    setBalanceB('N/A');
+                }
+            } catch (e) {
+                console.warn('Could not read token balances', e);
+                setBalanceA(null);
+                setBalanceB(null);
+            }
+
 
             // Normalize and compare addresses to avoid casing mismatches
             try {
@@ -139,7 +218,6 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
             setStatus('Connecting to contracts...');
             const MiniSwap = new ethers.Contract(MiniSwap_ADDRESS, MiniSwap_ABI, signer);
             // Use a JsonRpcProvider (network RPC) for reliable read operations
-            const readProvider = new ethers.JsonRpcProvider(RPC);
             const tokenARead = new ethers.Contract(tokenA, ERC20_ABI, readProvider as any);
             const tokenBRead = new ethers.Contract(tokenB, ERC20_ABI, readProvider as any);
             // Use signer-bound contracts for write operations (ensure runner supports sending txs)
@@ -248,10 +326,12 @@ export const Liquidity = ({ provider, account, canSendTx = false }: LiquidityPro
             <div className="input-group">
                 <label>Token A Address</label>
                 <input placeholder="0x..." value={tokenA} onChange={(e) => setTokenA(e.target.value)} />
+                <div className="token-balance">Balance: {balanceA ?? '—'}</div>
             </div>
             <div className="input-group">
                 <label>Token B Address</label>
                 <input placeholder="0x..." value={tokenB} onChange={(e) => setTokenB(e.target.value)} />
+                <div className="token-balance">Balance: {balanceB ?? '—'}</div>
             </div>
 
             {mode === 'add' && (

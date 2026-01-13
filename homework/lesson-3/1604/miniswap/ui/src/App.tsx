@@ -14,6 +14,7 @@ function App() {
   const [canSendTx, setCanSendTx] = useState<boolean>(false)
   const [chainId, setChainId] = useState<string | null>(null)
   const [networkError, setNetworkError] = useState<string | null>(null)
+  const [balance, setBalance] = useState<string | null>(null)
 
   const handleConnect = (connectedAccount: string, connectedProvider: ethers.BrowserProvider, _canSendTx: boolean) => {
     setAccount(connectedAccount)
@@ -33,6 +34,30 @@ function App() {
       }
     })();
   }, [provider]);
+
+  // Fetch and update native balance when provider/account/chain changes
+  useEffect(() => {
+    if (!provider || !account) {
+      setBalance(null);
+      return;
+    }
+
+    let mounted = true;
+    (async () => {
+      try {
+        const hex = await provider.send('eth_getBalance', [account, 'latest']);
+        const bn = BigInt(hex);
+        const formatted = Number(ethers.formatEther(bn));
+        const display = `${formatted.toFixed(6)} PAS`;
+        if (mounted) setBalance(display);
+      } catch (e) {
+        console.warn('Failed to fetch balance', e);
+        if (mounted) setBalance(null);
+      }
+    })();
+
+    return () => { mounted = false };
+  }, [provider, account, chainId]);
 
   const switchToPassetHub = async () => {
     setNetworkError(null);
@@ -83,8 +108,11 @@ function App() {
         <h1>MiniSwap Interface</h1>
         {account ? (
           <div className="account-display">
-            <div>Connected: {account.slice(0, 6)}...{account.slice(-4)}</div>
-            <div className="chain-status">Chain: {chainId || 'unknown'}</div>
+            <div className="account-line">
+              Connected: {account.slice(0, 6)}...{account.slice(-4)}
+              <span className="balance">{balance ? ` · ${balance}` : ''}</span>
+            </div>
+            <div className="chain-status">Chain: {chainId ? Number.parseInt(chainId, 16) : 'unknown'}</div>
             {chainId !== CHAIN_ID_HEX && (
               <div>
                 <button onClick={switchToPassetHub} className="switch-btn">Switch to PassetHub</button>
