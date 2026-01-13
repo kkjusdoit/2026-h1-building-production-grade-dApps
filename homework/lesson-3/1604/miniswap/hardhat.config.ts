@@ -91,7 +91,12 @@ module.exports = {
       // For passetHub, conditionally use polkavm depending on REVM setting
       ...(useREVM ? {} : { polkavm: true }),
       url: "https://testnet-passet-hub-eth-rpc.polkadot.io", // Polkadot Test Hub RPC
+      chainId: 420420422, // Explicit chain ID from the testnet RPC
       accounts: process.env.POLKADOT_PRIVATE_KEY ? [process.env.POLKADOT_PRIVATE_KEY] : [],
+      timeout: 60000,
+      gas: 6000000,
+      gasPrice: 1000000000, // 1 gwei - legacy tx pricing to avoid EIP-1559 incompatibilities
+      hardfork: "london",
     },
   },
 };
